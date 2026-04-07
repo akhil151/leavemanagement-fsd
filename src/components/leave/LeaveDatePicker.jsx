@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { DayPicker } from 'react-day-picker'
 import { startOfDay } from 'date-fns'
 import { cn } from '../../utils/cn'
@@ -22,7 +22,9 @@ export function LeaveDatePicker({
   suggestedDates = [],
   className,
 }) {
-  const today = startOfDay(new Date())
+  // Stable reference — only needs to be today's date, doesn't change during a session
+  const todayRef = useRef(startOfDay(new Date()))
+  const today = todayRef.current
 
   const disabled = useMemo(() => {
     const base = buildDisabledMatchers({

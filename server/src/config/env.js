@@ -26,7 +26,12 @@ export const env = {
     secret: required('JWT_SECRET', 'dev-only-change-me-use-long-secret'),
     expiresIn: process.env.JWT_EXPIRES_IN ?? '8h',
   },
-  corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  auth: {
+    allowPublicAdmin: process.env.ALLOW_PUBLIC_ADMIN === 'true',
+  },
+  corsOrigin: process.env.NODE_ENV === 'production'
+    ? required('CORS_ORIGIN')
+    : (process.env.CORS_ORIGIN ?? '*'),
   mail: {
     host: process.env.SMTP_HOST ?? '',
     port: Number(process.env.SMTP_PORT ?? 587),

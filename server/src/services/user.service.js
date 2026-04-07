@@ -78,8 +78,25 @@ export async function createUser(input) {
 
     if (input.role === 'student') {
       await conn.query(
+        `INSERT INTO students (user_id, student_code, department, parent_email, mentor_id)
+         VALUES (:id, :sc, :dept, :pe, :mid)`,
+        {
+          id,
+          sc: input.studentCode ?? null,
+          dept: input.department ?? null,
+          pe: input.parentEmail ?? null,
+          mid: input.mentorId ?? null,
+        },
+      )
+      await conn.query(
         `INSERT INTO leave_balances (user_id, sick, casual, on_duty) VALUES (:id, 10, 8, 5)`,
         { id },
+      )
+    } else if (input.role === 'teacher') {
+      await conn.query(
+        `INSERT INTO teachers (user_id, department)
+         VALUES (:id, :dept)`,
+        { id, dept: input.department ?? null },
       )
     }
 
@@ -132,6 +149,8 @@ export async function assignMentor(studentId, teacherId) {
   const pool = getPool()
   const conn = await pool.getConnection()
   try {
+    await conn.beginTransaction()
+
     const [sRows] = await conn.query(`SELECT id, role FROM users WHERE id = :id`, { id: studentId })
     const s = sRows[0]
     if (!s || s.role !== 'student') throw new ValidationError('Target user must be a student')
@@ -144,13 +163,21 @@ export async function assignMentor(studentId, teacherId) {
       tid: teacherId,
       sid: studentId,
     })
+    await conn.query(`UPDATE students SET mentor_id = :tid WHERE user_id = :sid`, {
+      tid: teacherId,
+      sid: studentId,
+    })
 
     await conn.query(
       `UPDATE leave_requests SET mentor_id = :tid WHERE student_id = :sid AND status = 'pending'`,
       { tid: teacherId, sid: studentId },
     )
 
+    await conn.commit()
     return { studentId, mentorId: teacherId }
+  } catch (e) {
+    await conn.rollback()
+    throw e
   } finally {
     conn.release()
   }

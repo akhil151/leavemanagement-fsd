@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
+import { apiGet, apiPost, hasRealApi } from '../../services/api'
 import { AppShell } from '../../components/layout/AppShell'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card'
@@ -15,14 +16,91 @@ export function AdminPanel() {
   const { user } = useAuth()
   const { students, teachers, mentorMap, balances, setMentor, adjustBalance } = useLeave()
   const loading = useSimulatedLoading(380)
+  const [apiDirectory, setApiDirectory] = useState(/** @type {{ students: any[]; teachers: any[] } | null} */ (null))
+  const [apiMentorMap, setApiMentorMap] = useState(/** @type {Record<string, string>} */ ({}))
+  const [apiError, setApiError] = useState(/** @type {string | null} */ (null))
+  const [assignBusy, setAssignBusy] = useState(false)
+  const [apiLoading, setApiLoading] = useState(false)
+
+  const loadApiDirectory = useCallback(async () => {
+    if (!hasRealApi) return
+    setApiLoading(true)
+    setApiError(null)
+    try {
+      const [sRes, tRes] = await Promise.all([
+        apiGet('/admin/users', { params: { role: 'student' } }),
+        apiGet('/admin/users', { params: { role: 'teacher' } }),
+      ])
+      const studentRows = sRes?.data?.data ?? []
+      const teacherRows = tRes?.data?.data ?? []
+      setApiDirectory({ students: studentRows, teachers: teacherRows })
+      const mm = {}
+      for (const s of studentRows) {
+        if (s.mentorId != null && String(s.mentorId)) mm[String(s.id)] = String(s.mentorId)
+      }
+      setApiMentorMap(mm)
+    } catch (e) {
+      setApiDirectory({ students: [], teachers: [] })
+      setApiError(e instanceof Error ? e.message : 'Failed to load directory')
+    } finally {
+      setApiLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!user || user.role !== 'admin' || !hasRealApi) return
+    void loadApiDirectory()
+  }, [user, loadApiDirectory])
+
+  const handleMentorChange = async (studentId, teacherId) => {
+    if (!teacherId) return
+    if (hasRealApi) {
+      setAssignBusy(true)
+      setApiError(null)
+      try {
+        await apiPost('/admin/assign-mentor', { studentId, teacherId })
+        setApiMentorMap((prev) => ({ ...prev, [studentId]: teacherId }))
+      } catch (e) {
+        setApiError(e instanceof Error ? e.message : 'Assign mentor failed')
+      } finally {
+        setAssignBusy(false)
+      }
+      return
+    }
+    setMentor({ studentId, teacherId })
+  }
 
   const rows = useMemo(() => {
+    if (hasRealApi) {
+      if (!apiDirectory) return []
+      return apiDirectory.students.map((s) => ({
+        student: {
+          id: String(s.id),
+          name: s.name,
+          studentId: s.studentCode ?? '',
+          department: s.department ?? '',
+        },
+        mentorId: apiMentorMap[String(s.id)] ?? (s.mentorId ? String(s.mentorId) : ''),
+        bal: balances[String(s.id)] ?? { sick: 0, casual: 0, onDuty: 0 },
+      }))
+    }
     return students.map((s) => ({
       student: s,
       mentorId: mentorMap[s.id] ?? '',
       bal: balances[s.id] ?? { sick: 0, casual: 0, onDuty: 0 },
     }))
-  }, [students, mentorMap, balances])
+  }, [students, mentorMap, balances, hasRealApi, apiDirectory, apiMentorMap])
+
+  const teacherOptions = useMemo(() => {
+    if (hasRealApi) {
+      if (!apiDirectory) return []
+      return apiDirectory.teachers.map((t) => ({
+        id: String(t.id),
+        name: t.name,
+      }))
+    }
+    return teachers.map((t) => ({ id: t.id, name: t.name }))
+  }, [hasRealApi, apiDirectory, teachers])
 
   if (!user || user.role !== 'admin') return null
 
@@ -34,6 +112,26 @@ export function AdminPanel() {
           description="Assign mentors and adjust leave balances. Changes apply immediately for the demo."
         />
 
+        {hasRealApi ? (
+          <Card className="border-[var(--color-border)]">
+            <CardHeader>
+              <CardTitle>Assign mentor (live)</CardTitle>
+              <CardDescription>
+                Select a student and teacher, then assign. Requires admin API access.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <MentorAssignForm
+                students={apiDirectory?.students ?? []}
+                teachers={apiDirectory?.teachers ?? []}
+                onAssign={handleMentorChange}
+                disabled={assignBusy || !apiDirectory}
+              />
+              {apiError ? <p className="text-sm text-red-600">{apiError}</p> : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
@@ -42,10 +140,11 @@ export function AdminPanel() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-[var(--color-text-muted)]">
               <p>
-                <span className="font-medium text-[var(--color-text)]">{students.length}</span> students
+                <span className="font-medium text-[var(--color-text)]">{rows.length}</span> students
               </p>
               <p>
-                <span className="font-medium text-[var(--color-text)]">{teachers.length}</span> mentors
+                <span className="font-medium text-[var(--color-text)]">{teacherOptions.length}</span>{' '}
+                mentors
               </p>
             </CardContent>
           </Card>
@@ -63,7 +162,7 @@ export function AdminPanel() {
 
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-[var(--color-text)]">Students & mentors</h2>
-          {loading ? (
+          {loading || (hasRealApi && apiLoading) ? (
             <TableRowSkeleton count={4} />
           ) : (
             <TableWrap>
@@ -89,12 +188,12 @@ export function AdminPanel() {
                       <Td className="min-w-[200px]">
                         <Select
                           value={mentorId}
-                          onChange={(e) =>
-                            setMentor({ studentId: student.id, teacherId: e.target.value })
-                          }
+                          onChange={(e) => void handleMentorChange(student.id, e.target.value)}
+                          disabled={assignBusy}
                           aria-label={`Mentor for ${student.name}`}
                         >
-                          {teachers.map((t) => (
+                          <option value="">— Select mentor —</option>
+                          {teacherOptions.map((t) => (
                             <option key={t.id} value={t.id}>
                               {t.name}
                             </option>
@@ -104,6 +203,7 @@ export function AdminPanel() {
                       <Td className="hidden lg:table-cell">
                         <BalanceInput
                           value={bal.sick}
+                          disabled={hasRealApi}
                           onCommit={(v) =>
                             adjustBalance({
                               studentId: student.id,
@@ -115,6 +215,7 @@ export function AdminPanel() {
                       <Td className="hidden lg:table-cell">
                         <BalanceInput
                           value={bal.casual}
+                          disabled={hasRealApi}
                           onCommit={(v) =>
                             adjustBalance({
                               studentId: student.id,
@@ -126,6 +227,7 @@ export function AdminPanel() {
                       <Td className="hidden lg:table-cell">
                         <BalanceInput
                           value={bal.onDuty}
+                          disabled={hasRealApi}
                           onCommit={(v) =>
                             adjustBalance({
                               studentId: student.id,
@@ -181,20 +283,25 @@ export function AdminPanel() {
 }
 
 /**
- * @param {{ value: number; onCommit: (n: number) => void }} props
+ * @param {{ value: number; onCommit: (n: number) => void; disabled?: boolean }} props
  */
-function BalanceInput({ value, onCommit }) {
+function BalanceInput({ value, onCommit, disabled }) {
   const [local, setLocal] = useState(String(value))
+  const [focused, setFocused] = useState(false)
   useEffect(() => {
-    setLocal(String(value))
-  }, [value])
+    if (!focused) setLocal(String(value))
+  }, [value, focused])
   return (
     <Input
       type="number"
       min={0}
       value={local}
+      disabled={disabled}
       onChange={(e) => setLocal(e.target.value)}
+      onFocus={() => setFocused(true)}
       onBlur={() => {
+        if (disabled) return
+        setFocused(false)
         const n = Math.max(0, Number.parseInt(local, 10) || 0)
         setLocal(String(n))
         onCommit(n)
@@ -205,13 +312,71 @@ function BalanceInput({ value, onCommit }) {
 }
 
 /**
+ * @param {{
+ *   students: any[]
+ *   teachers: any[]
+ *   onAssign: (studentId: string, teacherId: string) => void | Promise<void>
+ *   disabled?: boolean
+ * }} props
+ */
+function MentorAssignForm({ students, teachers, onAssign, disabled }) {
+  const [studentId, setStudentId] = useState('')
+  const [teacherId, setTeacherId] = useState('')
+  return (
+    <>
+      <div className="flex-1 min-w-[160px]">
+        <label className="text-xs text-[var(--color-text-muted)] block mb-1">Student</label>
+        <Select
+          value={studentId}
+          onChange={(e) => setStudentId(e.target.value)}
+          disabled={disabled}
+          aria-label="Student for mentor assignment"
+        >
+          <option value="">— Select student —</option>
+          {students.map((s) => (
+            <option key={s.id} value={String(s.id)}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex-1 min-w-[160px]">
+        <label className="text-xs text-[var(--color-text-muted)] block mb-1">Teacher</label>
+        <Select
+          value={teacherId}
+          onChange={(e) => setTeacherId(e.target.value)}
+          disabled={disabled}
+          aria-label="Teacher mentor"
+        >
+          <option value="">— Select teacher —</option>
+          {teachers.map((t) => (
+            <option key={t.id} value={String(t.id)}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={disabled || !studentId || !teacherId}
+        onClick={() => void onAssign(studentId, teacherId)}
+      >
+        Assign
+      </Button>
+    </>
+  )
+}
+
+/**
  * @param {{ label: string; value: number; onSave: (n: number) => void }} props
  */
 function MiniBal({ label, value, onSave }) {
   const [local, setLocal] = useState(String(value))
+  const [focused, setFocused] = useState(false)
   useEffect(() => {
-    setLocal(String(value))
-  }, [value])
+    if (!focused) setLocal(String(value))
+  }, [value, focused])
   return (
     <div>
       <label className="text-[10px] uppercase text-[var(--color-text-subtle)]">{label}</label>
@@ -220,7 +385,9 @@ function MiniBal({ label, value, onSave }) {
         min={0}
         value={local}
         onChange={(e) => setLocal(e.target.value)}
+        onFocus={() => setFocused(true)}
         onBlur={() => {
+          setFocused(false)
           const n = Math.max(0, Number.parseInt(local, 10) || 0)
           setLocal(String(n))
           onSave(n)

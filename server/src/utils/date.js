@@ -14,8 +14,10 @@ export function inclusiveDays(start, end) {
 }
 
 /**
- * @param {string} a
- * @param {string} b
+ * @param {string} aStart
+ * @param {string} aEnd
+ * @param {string} bStart
+ * @param {string} bEnd
  */
 export function datesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart <= bEnd && aEnd >= bStart

@@ -33,7 +33,7 @@ export async function getNotifications(input) {
   sql += ' ORDER BY created_at DESC LIMIT :lim'
 
   try {
-    return query(pool, sql, params)
+    return await query(pool, sql, params)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     // Backward compatibility: older DB schema may not include `type` / `priority`.

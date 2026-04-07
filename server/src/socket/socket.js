@@ -1,6 +1,7 @@
 import { Server } from 'socket.io'
 import { verifyToken } from '../utils/jwt.js'
 import { env } from '../config/env.js'
+import { log } from '../utils/logger.js'
 
 /**
  * @param {import('http').Server} httpServer
@@ -31,6 +32,10 @@ export function attachSocket(httpServer) {
         : null)
 
     if (!raw) {
+      log.warn('auth.socket_missing_token', {
+        ip: socket.handshake.address,
+        ua: socket.handshake.headers['user-agent'],
+      })
       return next(new Error('auth required'))
     }
     try {
@@ -40,6 +45,10 @@ export function attachSocket(httpServer) {
       socket.data.email = d.email
       return next()
     } catch {
+      log.warn('auth.socket_invalid_token', {
+        ip: socket.handshake.address,
+        ua: socket.handshake.headers['user-agent'],
+      })
       return next(new Error('auth required'))
     }
   })

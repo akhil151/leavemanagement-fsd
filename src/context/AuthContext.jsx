@@ -7,7 +7,7 @@ import { apiPost, hasRealApi, setApiAuthToken } from '../services/api'
  * @typedef {{ id: string; name: string; email: string; role: Role; meta?: Record<string, string> }} User
  */
 
-/** @type {React.Context<{ user: User | null; login: (p: { email: string; password: string; role: Role }) => Promise<void>; logout: () => void; authError: string | null; isAuthLoading: boolean }> | null} */
+/** @type {React.Context<{ user: User | null; login: (p: { email: string; password: string; role: Role }) => Promise<void>; register: (p: { name: string; email: string; password: string; role: Role }) => Promise<void>; logout: () => void; authError: string | null; isAuthLoading: boolean }> | null} */
 const AuthContext = createContext(null)
 
 const ADMIN_USER = {
@@ -76,6 +76,8 @@ export function AuthProvider({ children }) {
           meta: {
             studentId: data.user.studentCode ?? '',
             department: data.user.department ?? '',
+            mentorId: data.user.mentorId ?? '',
+            mentorName: data.user.mentorName ?? '',
           },
         })
       } else {
@@ -83,6 +85,55 @@ export function AuthProvider({ children }) {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Sign-in failed'
+      setAuthError(msg)
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }, [])
+
+  const register = useCallback(async ({ name, email, password, role }) => {
+    setAuthError(null)
+    setIsAuthLoading(true)
+    await new Promise((r) => setTimeout(r, 650))
+    try {
+      if (!name?.trim()) throw new Error('Name is required')
+      if (!email?.trim()) throw new Error('Email is required')
+      if (!password || password.length < 8) throw new Error('Password must be at least 8 characters')
+
+      if (hasRealApi) {
+        const res = await apiPost('/register', {
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+          role,
+        })
+        const data = res?.data?.data
+        if (!res?.data?.success || !data?.user) throw new Error('Registration failed')
+        setApiAuthToken(data.token || null)
+        setUser({
+          id: data.user.id,
+          name: data.user.name,
+          email: data.user.email,
+          role: data.user.role,
+          meta: {
+            studentId: data.user.studentCode ?? '',
+            department: data.user.department ?? '',
+            mentorId: data.user.mentorId ?? '',
+            mentorName: data.user.mentorName ?? '',
+          },
+        })
+      } else {
+        const normalized = email.trim().toLowerCase()
+        if (role === 'admin') {
+          setUser({ ...ADMIN_USER, name: name.trim(), email: normalized })
+        } else {
+          // Demo registration: map to known seed users to keep existing flows intact.
+          const seeded = resolveUser({ email: normalized, role })
+          setUser({ ...seeded, name: name.trim(), email: normalized })
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Registration failed'
       setAuthError(msg)
     } finally {
       setIsAuthLoading(false)
@@ -99,11 +150,12 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       login,
+      register,
       logout,
       authError,
       isAuthLoading,
     }),
-    [user, login, logout, authError, isAuthLoading],
+    [user, login, register, logout, authError, isAuthLoading],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

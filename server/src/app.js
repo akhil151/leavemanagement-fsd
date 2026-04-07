@@ -10,6 +10,8 @@ import leaveRoutes from './routes/leave.routes.js'
 import notificationsRoutes from './routes/notifications.routes.js'
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
 import { createRouteRateLimiter, sanitizeInput } from './middleware/security.middleware.js'
+import { getDbHealthStatus, getPool } from './config/database.js'
+import { log } from './utils/logger.js'
 
 const app = express()
 
@@ -28,6 +30,30 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }))
 app.use(sanitizeInput)
+
+app.use((req, res, next) => {
+  const startedAt = Date.now()
+  const requestId =
+    (typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id']) ||
+    `req_${startedAt}_${Math.random().toString(16).slice(2)}`
+
+  res.setHeader('x-request-id', requestId)
+
+  res.on('finish', () => {
+    const ms = Date.now() - startedAt
+    log.info('api.request', {
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      ms,
+      ip: req.ip,
+      ua: req.headers['user-agent'],
+    })
+  })
+
+  next()
+})
 
 const globalLimiter = createRouteRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -52,8 +78,44 @@ const leaveLimiter = createRouteRateLimiter({
 
 app.use(globalLimiter)
 
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'leavemanage-api', env: env.nodeEnv })
+app.get('/health', async (req, res) => {
+  try {
+    const pool = getPool()
+    await pool.query('SELECT 1')
+    const [[{ tableCount }]] = await pool.query(
+      `SELECT COUNT(*) AS tableCount
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name IN (
+           'users',
+           'students',
+           'teachers',
+           'leave_requests',
+           'leave_balances',
+           'notifications',
+           'audit_logs'
+         )`,
+    )
+    const dbStatus = getDbHealthStatus()
+    const tablesOk = Number(tableCount) === 7 && dbStatus.tablesVerified
+    res.json({
+      ok: true,
+      server: 'ok',
+      database: 'connected',
+      tables: tablesOk ? 'verified' : 'unverified',
+    })
+  } catch (e) {
+    log.error('db.healthcheck_failed', {
+      requestId: res.getHeader('x-request-id'),
+      error: e instanceof Error ? e.message : String(e),
+    })
+    res.status(200).json({
+      ok: true,
+      server: 'ok',
+      database: 'disconnected',
+      tables: 'unverified',
+    })
+  }
 })
 
 app.use('/', authLimiter, authRoutes)

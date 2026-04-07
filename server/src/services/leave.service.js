@@ -60,10 +60,29 @@ export async function getStudentDashboard(studentId) {
     )
   }
 
+  const [mentorRows] = await pool.query(
+    `SELECT u.mentor_id AS mentorId, m.name AS mentorName, m.email AS mentorEmail
+     FROM users u
+     LEFT JOIN users m ON m.id = u.mentor_id
+     WHERE u.id = :id LIMIT 1`,
+    { id: studentId },
+  )
+  const mentor = /** @type {{ mentorId: number | null; mentorName: string | null; mentorEmail: string | null } | undefined} */ (
+    mentorRows[0]
+  )
+
   return {
     balances: { sick: bal.sick, casual: bal.casual, onDuty: bal.on_duty },
     recentLeaves: recent,
     notifications,
+    mentor:
+      mentor?.mentorId != null
+        ? {
+            id: String(mentor.mentorId),
+            name: mentor.mentorName ?? '',
+            email: mentor.mentorEmail ?? null,
+          }
+        : null,
   }
 }
 
@@ -110,6 +129,10 @@ export async function applyLeave(input) {
     )
     if (!user || user.role !== 'student') {
       throw new ForbiddenError('Only students can apply for leave')
+    }
+
+    if (!user.mentor_id) {
+      throw new ValidationError('No mentor assigned', 'NO_MENTOR')
     }
 
     if (input.startDate > input.endDate) {
@@ -226,7 +249,7 @@ export async function getTeacherLeaveRequests(teacherId, filter = {}) {
            lr.mentor_comment AS mentorComment, lr.submitted_at AS submittedAt, lr.resolved_at AS resolvedAt
     FROM leave_requests lr
     INNER JOIN users u ON u.id = lr.student_id
-    WHERE u.mentor_id = :tid
+    WHERE lr.mentor_id = :tid
   `
   const params = { tid: teacherId }
   if (status !== 'all') {

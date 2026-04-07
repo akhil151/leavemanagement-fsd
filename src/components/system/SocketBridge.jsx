@@ -24,8 +24,9 @@ export function SocketBridge() {
       auth: { token: import.meta.env.VITE_WS_TOKEN ?? '' },
       reconnection: true,
       reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      randomizationFactor: 0.25,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000,
+      randomizationFactor: 0.5,
     })
 
     const dispatchStatus = (online) => {
@@ -33,6 +34,7 @@ export function SocketBridge() {
     }
 
     let pollingTimer = null
+    let lastPollErrorAt = 0
     const stopPolling = () => {
       if (pollingTimer) {
         clearInterval(pollingTimer)
@@ -59,8 +61,13 @@ export function SocketBridge() {
               createdAt: r.createdAt,
             })
           }
-        } catch {
+        } catch (e) {
           // Best-effort polling only; never crash the app.
+          const now = Date.now()
+          if (now - lastPollErrorAt > 60_000) {
+            lastPollErrorAt = now
+            console.warn('[SocketBridge] polling notifications failed', e)
+          }
         }
       }, 15000)
     }

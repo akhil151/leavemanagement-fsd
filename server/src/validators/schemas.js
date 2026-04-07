@@ -5,6 +5,20 @@ export const loginSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 })
 
+const passwordStrong = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .refine((v) => /[A-Za-z]/.test(v) && /\d/.test(v), {
+    message: 'Password must include at least one letter and one number',
+  })
+
+export const registerSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  email: z.string().trim().toLowerCase().email('Invalid email'),
+  password: passwordStrong,
+  role: z.enum(['student', 'teacher', 'admin']),
+})
+
 export const applyLeaveSchema = z.object({
   type: z.enum(['sick', 'casual', 'on_duty']),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD'),
@@ -24,7 +38,7 @@ export const teacherFilterSchema = z.object({
 
 export const createUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: passwordStrong,
   role: z.enum(['student', 'teacher', 'admin']),
   name: z.string().min(1).max(255),
   studentCode: z.string().max(64).optional().nullable(),

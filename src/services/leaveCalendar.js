@@ -93,23 +93,24 @@ export function suggestLeaveWindows(fromIso, lengthBusinessDays, holidays = [], 
   const holidaySet = new Set(holidays)
   let cursor = startOfDay(parseISO(fromIso))
   const out = []
-  let guard = 0
-  while (out.length < maxSuggestions && guard < 400) {
-    guard++
+  let outerGuard = 0
+  while (out.length < maxSuggestions && outerGuard < 400) {
+    outerGuard++
     while (isWeekend(cursor) || holidaySet.has(format(cursor, 'yyyy-MM-dd'))) {
       cursor = addDays(cursor, 1)
     }
     let span = 0
     let end = cursor
     let walk = cursor
-    while (span < lengthBusinessDays && guard < 500) {
+    let innerGuard = 0
+    while (span < lengthBusinessDays && innerGuard < 500) {
+      innerGuard++
       if (!isWeekend(walk) && !holidaySet.has(format(walk, 'yyyy-MM-dd'))) {
         span++
         end = walk
       }
       if (span >= lengthBusinessDays) break
       walk = addDays(walk, 1)
-      guard++
     }
     if (span >= lengthBusinessDays) {
       out.push({

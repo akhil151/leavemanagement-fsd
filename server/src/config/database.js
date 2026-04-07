@@ -3,6 +3,27 @@ import { env } from './env.js'
 
 /** @type {mysql.Pool | null} */
 let pool = null
+let dbConnected = false
+let tablesVerified = false
+
+/**
+ * @param {mysql.Pool} nextPool
+ */
+export function setPool(nextPool) {
+  pool = nextPool
+  dbConnected = true
+}
+
+export function setTablesVerified(value) {
+  tablesVerified = Boolean(value)
+}
+
+export function getDbHealthStatus() {
+  return {
+    connected: dbConnected,
+    tablesVerified,
+  }
+}
 
 export function getPool() {
   if (!pool) {

@@ -15,6 +15,7 @@ import { formatDateRange } from '../../utils/date'
 import { leaveTypeLabel } from '../../utils/leaveLabels'
 import { cn } from '../../utils/cn'
 import { computeLeaveRiskScore } from '../../services/leaveIntelligence'
+import { hasRealApi } from '../../services/api'
 
 export function StudentDashboard() {
   const { user } = useAuth()
@@ -64,6 +65,26 @@ export function StudentDashboard() {
             </Link>
           }
         />
+
+        {hasRealApi && user.role === 'student' ? (
+          <Card className="border-[var(--color-border)]">
+            <CardHeader className="!mb-1">
+              <CardDescription>Assigned mentor</CardDescription>
+              <CardTitle className="text-base">
+                {user.meta?.mentorName?.trim()
+                  ? user.meta.mentorName
+                  : user.meta?.mentorId
+                    ? `Mentor ID ${user.meta.mentorId}`
+                    : 'Not assigned — ask your administrator'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Leave requests are sent to your assigned mentor for approval.
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {!loading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

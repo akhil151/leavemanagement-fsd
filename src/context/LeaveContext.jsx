@@ -52,6 +52,9 @@ function applyBalanceDeduction(balances, req, deduct) {
   }
 }
 
+// Use a separator that cannot appear in user-supplied text to avoid fingerprint collisions
+const FP_SEP = '\x00'
+
 function reducer(state, action) {
   switch (action.type) {
     case 'APPLY_LEAVE': {
@@ -102,7 +105,7 @@ function reducer(state, action) {
           id: `n_${Date.now()}_m`,
           recipientId: mentorId,
           title: 'New leave request',
-          body: `${studentName} submitted ${leaveType} leave (${start}${start !== end ? ` – ${end}` : ''}).`,
+          body: `${studentName} submitted ${leaveType} leave (${start}${start !== end ? ` \u2013 ${end}` : ''}).`,
           priority: priority === 'urgent' ? 'critical' : 'info',
           type: 'leave_applied',
           createdAt: submittedAt,
@@ -183,12 +186,13 @@ function reducer(state, action) {
     }
     case 'INGEST_REALTIME_NOTIFICATION': {
       // De-dupe to prevent duplicate entries from socket + polling fallback.
+      // Use null-byte separator to avoid collisions with pipe chars in content.
       const incoming = action.payload
       const incomingId = incoming?.id != null ? String(incoming.id) : null
-      const incomingFP = `${incoming?.title ?? ''}|${incoming?.body ?? ''}|${incoming?.createdAt ?? ''}`
+      const incomingFP = `${incoming?.title ?? ''}${FP_SEP}${incoming?.body ?? ''}${FP_SEP}${incoming?.createdAt ?? ''}`
       const exists = state.notifications.some((n) => {
         if (incomingId != null && String(n.id) === incomingId) return true
-        const fp = `${n.title ?? ''}|${n.body ?? ''}|${n.createdAt ?? ''}`
+        const fp = `${n.title ?? ''}${FP_SEP}${n.body ?? ''}${FP_SEP}${n.createdAt ?? ''}`
         return fp === incomingFP
       })
       if (exists) return state
@@ -246,7 +250,7 @@ function resolveOne(state, input) {
     title: status === 'approved' ? 'Leave approved' : 'Leave rejected',
     body:
       status === 'approved'
-        ? `Your ${req.type} leave (${req.start}${req.start !== req.end ? ` – ${req.end}` : ''}) was approved.`
+        ? `Your ${req.type} leave (${req.start}${req.start !== req.end ? ` \u2013 ${req.end}` : ''}) was approved.`
         : `Your ${req.type} leave was rejected.${mentorComment ? ` Comment: ${mentorComment}` : ''}`,
     priority: status === 'approved' ? 'info' : 'warning',
     type: 'leave_updated',

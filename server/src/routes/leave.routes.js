@@ -14,6 +14,8 @@ const r = Router()
 // Model-driven approval probability for a student's leave application.
 r.get(
   '/prediction/:studentId',
+  authenticate,
+  requireRoles('student', 'teacher', 'admin'),
   validate(leavePredictionParamsSchema, 'params'),
   validate(leavePredictionQuerySchema, 'query'),
   leavePredictionController.predictLeaveApproval,

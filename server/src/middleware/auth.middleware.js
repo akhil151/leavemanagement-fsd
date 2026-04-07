@@ -1,5 +1,6 @@
 import { verifyToken } from '../utils/jwt.js'
 import { UnauthorizedError, ForbiddenError } from '../utils/errors.js'
+import { log } from '../utils/logger.js'
 
 /**
  * @param {import('express').Request} req
@@ -22,7 +23,13 @@ export function authenticate(req, res, next) {
       email: decoded.email,
     }
     next()
-  } catch {
+  } catch (e) {
+    log.warn('auth.failed', {
+      requestId: res.getHeader('x-request-id'),
+      path: req.originalUrl,
+      method: req.method,
+      error: e instanceof Error ? e.message : String(e),
+    })
     next(new UnauthorizedError('Invalid or expired token'))
   }
 }
