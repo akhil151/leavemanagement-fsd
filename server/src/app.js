@@ -15,6 +15,10 @@ import { log } from './utils/logger.js'
 
 const app = express()
 
+// Trust Render/Vercel proxy so rate limiting uses real client IPs,
+// not the load balancer IP (which would cause all users to share one bucket).
+app.set('trust proxy', 1)
+
 const corsOrigins =
   env.corsOrigin === '*'
     ? true
@@ -57,14 +61,14 @@ app.use((req, res, next) => {
 
 const globalLimiter = createRouteRateLimiter({
   windowMs: 15 * 60 * 1000,
-  maxProd: 300,
+  maxProd: 500,
   maxDev: 2000,
   message: 'Too many requests from this client',
 })
 
 const authLimiter = createRouteRateLimiter({
   windowMs: 15 * 60 * 1000,
-  maxProd: 20,
+  maxProd: 50,
   maxDev: 120,
   message: 'Too many login attempts. Please try again later.',
 })
