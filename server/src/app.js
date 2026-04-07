@@ -93,11 +93,12 @@ app.get('/health', async (req, res) => {
            'leave_requests',
            'leave_balances',
            'notifications',
-           'audit_logs'
+           'audit_logs',
+           'notification_log'
          )`,
     )
     const dbStatus = getDbHealthStatus()
-    const tablesOk = Number(tableCount) === 7 && dbStatus.tablesVerified
+    const tablesOk = Number(tableCount) === 8 && dbStatus.tablesVerified
     res.json({
       ok: true,
       server: 'ok',

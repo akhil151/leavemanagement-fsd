@@ -13,15 +13,20 @@ export function SocketBridge() {
   const { ingestRealtimeNotification } = useLeave()
 
   useEffect(() => {
-    const url = import.meta.env.VITE_WS_URL
-    if (!url || !user) return
+    const apiBaseUrl = import.meta.env.VITE_WS_URL
+    if (!apiBaseUrl || !user) return
 
-    const apiToken = import.meta.env.VITE_API_TOKEN
-    const canPollApi = !!apiToken
+    // Use the same auth token that api.js stores in localStorage
+    const storedToken = typeof window !== 'undefined'
+      ? window.localStorage.getItem('leave_auth_token')
+      : null
+    const wsToken = storedToken ?? import.meta.env.VITE_WS_TOKEN ?? ''
 
-    const socket = io(url, {
+    const canPollApi = !!storedToken
+
+    const socket = io(apiBaseUrl, {
       transports: ['websocket', 'polling'],
-      auth: { token: import.meta.env.VITE_WS_TOKEN ?? '' },
+      auth: { token: wsToken },
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -87,17 +92,22 @@ export function SocketBridge() {
 
     const onApplied = (payload, ack) => {
       try {
-        if (user.role !== 'teacher') return
-        ingestRealtimeNotification({
-          id: `rt_${Date.now()}_a`,
-          recipientId: user.id,
-          title: 'New leave request',
-          body: `${payload.studentName ?? 'Student'} submitted leave (${payload.startDate ?? ''} – ${payload.endDate ?? ''}).`,
-          type: 'leave_applied',
-          priority: 'info',
-          read: false,
-          createdAt: new Date().toISOString(),
-        })
+        if (user.role === 'teacher') {
+          // Dispatch window event so TeacherDashboard can re-fetch (APPEND not reset)
+          window.dispatchEvent(
+            new CustomEvent('teacher:leave_applied', { detail: payload }),
+          )
+          ingestRealtimeNotification({
+            id: `rt_${Date.now()}_a`,
+            recipientId: user.id,
+            title: 'New leave request',
+            body: `${payload.studentName ?? 'Student'} submitted leave (${payload.startDate ?? ''} – ${payload.endDate ?? ''}).`,
+            type: 'leave_applied',
+            priority: 'info',
+            read: false,
+            createdAt: new Date().toISOString(),
+          })
+        }
         if (ack) ack({ ok: true })
       } catch {
         if (ack) ack({ ok: false })
@@ -108,6 +118,8 @@ export function SocketBridge() {
       try {
         if (user.role !== 'student') return
         if (payload.studentId && payload.studentId !== user.id) return
+        // Signal StudentDashboard to re-fetch from API
+        window.dispatchEvent(new CustomEvent('student:leave_updated', { detail: payload }))
         ingestRealtimeNotification({
           id: `rt_${Date.now()}_u`,
           recipientId: user.id,

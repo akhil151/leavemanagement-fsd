@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
+import { apiPost, hasRealApi } from '../../services/api'
 import { AppShell } from '../../components/layout/AppShell'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card'
@@ -189,24 +190,45 @@ export function ApplyLeavePage() {
 
     setFormError(null)
     setSubmitting(true)
-    await new Promise((r) => setTimeout(r, 400))
-
-    applyLeave({
-      studentId: user.id,
-      studentName: user.name,
-      leaveType: type,
-      start,
-      end,
-      reason: reason.trim(),
-      fileName: file?.name ?? null,
-      businessDays,
-      deductDays: deductUnits,
-      halfDay: effectiveHalf,
-      priority,
-    })
-
-    setSubmitting(false)
-    navigate('/student', { replace: true })
+    try {
+      if (hasRealApi) {
+        // Real backend: POST to /student/apply-leave
+        // leaveType must be 'sick' | 'casual' | 'on_duty' (backend ENUM)
+        const apiLeaveType = type === 'onDuty' ? 'on_duty' : type
+        await apiPost('/student/apply-leave', {
+          type: apiLeaveType,
+          startDate: start,
+          endDate: end,
+          reason: reason.trim(),
+          attachmentName: file?.name ?? null,
+        })
+        // Notify teacher dashboard to refresh its list via socket or polling fallback
+        window.dispatchEvent(new CustomEvent('teacher:leave_applied', { detail: { studentId: user.id } }))
+      } else {
+        // Demo / mock mode: update local context state
+        await new Promise((r) => setTimeout(r, 400))
+        applyLeave({
+          studentId: user.id,
+          studentName: user.name,
+          leaveType: type,
+          start,
+          end,
+          reason: reason.trim(),
+          fileName: file?.name ?? null,
+          businessDays,
+          deductDays: deductUnits,
+          halfDay: effectiveHalf,
+          priority,
+        })
+      }
+      navigate('/student', { replace: true })
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to submit leave request'
+      setFormError(msg)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (!user || user.role !== 'student') return null

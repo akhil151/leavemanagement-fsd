@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
 import { AppShell } from '../../components/layout/AppShell'
@@ -14,12 +14,40 @@ import { TableRowSkeleton } from '../../components/skeletons/Skeleton'
 import { formatDateRange } from '../../utils/date'
 import { leaveTypeLabel } from '../../utils/leaveLabels'
 import { cn } from '../../utils/cn'
+import { apiGet, apiPost, hasRealApi } from '../../services/api'
 
 /** @typedef {'all' | 'pending' | 'approved'} Filter */
 
+/**
+ * Normalize a leave request from the real API response into the shape
+ * the UI expects (matching the mock seedData shape).
+ * @param {any} row
+ * @returns {object}
+ */
+function normalizeApiRequest(row) {
+  return {
+    id: String(row.id),
+    studentId: String(row.studentId ?? row.student_id),
+    studentName: row.studentName ?? row.student_name ?? 'Unknown',
+    type: row.type,
+    start: row.startDate ?? row.start_date ?? row.start ?? '',
+    end: row.endDate ?? row.end_date ?? row.end ?? '',
+    reason: row.reason ?? '',
+    status: row.status,
+    mentorComment: row.mentorComment ?? row.mentor_comment ?? undefined,
+    submittedAt: row.submittedAt ?? row.submitted_at ?? new Date().toISOString(),
+    resolvedAt: row.resolvedAt ?? row.resolved_at ?? undefined,
+    priority: row.priority ?? 'normal',
+    auditHistory: row.auditHistory ?? [],
+  }
+}
+
 export function TeacherDashboard() {
   const { user } = useAuth()
-  const { requests, mentorMap, resolveRequest, bulkResolveRequests } = useLeave()
+
+  // --- Mock-mode: read from LeaveContext (seed data) ---
+  const { requests: mockRequests, mentorMap, resolveRequest, bulkResolveRequests } = useLeave()
+
   const loading = useSimulatedLoading(420)
   const [filter, setFilter] = useState(/** @type {Filter} */ ('pending'))
 
@@ -28,20 +56,108 @@ export function TeacherDashboard() {
   const [historyId, setHistoryId] = useState(/** @type {string | null} */ (null))
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
   const [selected, setSelected] = useState(/** @type {Set<string>} */ (new Set()))
+
+  // --- Real-API mode state ---
+  const [apiRequests, setApiRequests] = useState(/** @type {any[]} */ ([]))
+  const [apiLoading, setApiLoading] = useState(false)
+  const [apiError, setApiError] = useState(/** @type {string | null} */ (null))
+  const fetchedRef = useRef(false)
 
   const teacherId = user?.id
 
+  // Fetch from real API when available
+  const fetchLeaveRequests = useCallback(
+    async (filterStatus = 'all') => {
+      if (!hasRealApi || !teacherId) return
+      setApiLoading(true)
+      setApiError(null)
+      try {
+        const res = await apiGet('/teacher/leave-requests', {
+          params: filterStatus !== 'all' ? { status: filterStatus } : undefined,
+        })
+        const rows = res?.data?.data ?? []
+        setApiRequests(rows.map(normalizeApiRequest))
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to load leave requests'
+        setApiError(msg)
+        console.error('[TeacherDashboard] fetch error:', e)
+      } finally {
+        setApiLoading(false)
+      }
+    },
+    [teacherId],
+  )
+
+  // Initial fetch
+  useEffect(() => {
+    if (!hasRealApi) return
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+    fetchLeaveRequests()
+  }, [fetchLeaveRequests])
+
+  // Re-fetch when filter changes (real-API mode)
+  useEffect(() => {
+    if (!hasRealApi) return
+    fetchLeaveRequests(filter)
+  }, [filter, fetchLeaveRequests])
+
+  // Socket: merge incoming leave_applied event into local apiRequests list
+  // SocketBridge only does notifications; we also need to add the request card here.
+  useEffect(() => {
+    if (!hasRealApi) return
+
+    const handler = (e) => {
+      const payload = e.detail
+      if (!payload) return
+      // Re-fetch to get the full normalized row from the API instead of patch-building it.
+      fetchLeaveRequests(filter)
+    }
+
+    window.addEventListener('teacher:leave_applied', handler)
+    return () => window.removeEventListener('teacher:leave_applied', handler)
+  }, [fetchLeaveRequests, filter])
+
+  // Real-API approve / reject
+  const apiResolve = useCallback(
+    async (requestId, actionDecision, actionComment) => {
+      if (!hasRealApi) return
+      const endpoint = actionDecision === 'approved' ? '/teacher/approve-leave' : '/teacher/reject-leave'
+      const res = await apiPost(endpoint, {
+        requestId,
+        comment: actionComment ?? undefined,
+      })
+      const updated = res?.data?.data
+      // Merge: update the status in local list
+      setApiRequests((prev) =>
+        prev.map((r) =>
+          r.id === String(requestId)
+            ? { ...r, status: updated?.status ?? actionDecision, mentorComment: actionComment || r.mentorComment }
+            : r,
+        ),
+      )
+    },
+    [],
+  )
+
+  // --- Determine which queue to show ---
   const queue = useMemo(() => {
-    return requests.filter((r) => mentorMap[r.studentId] === teacherId)
-  }, [requests, mentorMap, teacherId])
+    if (hasRealApi) {
+      // Real API: all requests in apiRequests are already filtered server-side by mentor_id
+      return apiRequests
+    }
+    // Mock: filter by mentorMap
+    return mockRequests.filter((r) => mentorMap[r.studentId] === teacherId)
+  }, [hasRealApi, apiRequests, mockRequests, mentorMap, teacherId])
 
   const filtered = useMemo(() => {
     if (filter === 'all') return queue
     if (filter === 'pending') return queue.filter((r) => r.status === 'pending')
     return queue.filter((r) => r.status === 'approved')
   }, [queue, filter])
+
+  const isLoading = hasRealApi ? apiLoading : loading
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -76,20 +192,29 @@ export function TeacherDashboard() {
   const confirm = async () => {
     if (!activeId || !decision || !teacherId) return
     setSubmitting(true)
-    await new Promise((r) => setTimeout(r, 400))
-    resolveRequest({
-      requestId: activeId,
-      status: decision,
-      mentorComment: comment.trim() || undefined,
-      teacherId,
-    })
-    setSubmitting(false)
-    closeModal()
-    setSelected((s) => {
-      const n = new Set(s)
-      n.delete(activeId)
-      return n
-    })
+    try {
+      if (hasRealApi) {
+        await apiResolve(activeId, decision, comment.trim() || undefined)
+      } else {
+        await new Promise((r) => setTimeout(r, 400))
+        resolveRequest({
+          requestId: activeId,
+          status: decision,
+          mentorComment: comment.trim() || undefined,
+          teacherId,
+        })
+      }
+    } catch (e) {
+      console.error('[TeacherDashboard] resolve error:', e)
+    } finally {
+      setSubmitting(false)
+      closeModal()
+      setSelected((s) => {
+        const n = new Set(s)
+        n.delete(activeId)
+        return n
+      })
+    }
   }
 
   const bulkConfirm = async (status) => {
@@ -100,15 +225,26 @@ export function TeacherDashboard() {
     })
     if (!ids.length) return
     setSubmitting(true)
-    await new Promise((r) => setTimeout(r, 500))
-    bulkResolveRequests({
-      requestIds: ids,
-      status,
-      mentorComment: undefined,
-      teacherId,
-    })
-    setSubmitting(false)
-    clearSelection()
+    try {
+      if (hasRealApi) {
+        for (const id of ids) {
+          await apiResolve(id, status, undefined)
+        }
+      } else {
+        await new Promise((r) => setTimeout(r, 500))
+        bulkResolveRequests({
+          requestIds: ids,
+          status,
+          mentorComment: undefined,
+          teacherId,
+        })
+      }
+    } catch (e) {
+      console.error('[TeacherDashboard] bulk resolve error:', e)
+    } finally {
+      setSubmitting(false)
+      clearSelection()
+    }
   }
 
   const activeReq = queue.find((r) => r.id === activeId)
@@ -146,6 +282,15 @@ export function TeacherDashboard() {
           title="Mentor inbox"
           description="Review leave requests from students assigned to you. Use bulk actions for high-volume weeks."
         />
+
+        {apiError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 px-4 py-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-red-700 dark:text-red-300">{apiError}</p>
+            <Button size="sm" variant="secondary" onClick={() => fetchLeaveRequests(filter)}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2 justify-between">
           <div className="flex flex-wrap gap-2">
@@ -202,7 +347,7 @@ export function TeacherDashboard() {
           ) : null}
         </div>
 
-        {loading ? (
+        {isLoading ? (
           <TableRowSkeleton count={4} />
         ) : filtered.length === 0 ? (
           <EmptyState

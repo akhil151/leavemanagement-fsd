@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
@@ -15,22 +15,86 @@ import { formatDateRange } from '../../utils/date'
 import { leaveTypeLabel } from '../../utils/leaveLabels'
 import { cn } from '../../utils/cn'
 import { computeLeaveRiskScore } from '../../services/leaveIntelligence'
-import { hasRealApi } from '../../services/api'
+import { apiGet, hasRealApi } from '../../services/api'
 
 export function StudentDashboard() {
   const { user } = useAuth()
-  const { balances, requests, notifications, markNotificationRead } = useLeave()
+  const { balances: mockBalances, requests: mockRequests, notifications, markNotificationRead } = useLeave()
   const loading = useSimulatedLoading(480)
 
   const studentId = user?.id
-  const balance = studentId ? balances[studentId] : null
 
-  const myRequests = useMemo(
-    () => requests.filter((r) => r.studentId === studentId).slice(0, 8),
-    [requests, studentId],
-  )
+  // --- Real-API state ---
+  const [apiDashboard, setApiDashboard] = useState(/** @type {any | null} */ (null))
+  const [apiLoading, setApiLoading] = useState(false)
+  const fetchedRef = useRef(false)
 
-  const allMine = useMemo(() => requests.filter((r) => r.studentId === studentId), [requests, studentId])
+  const fetchDashboard = async () => {
+    if (!hasRealApi || !studentId) return
+    setApiLoading(true)
+    try {
+      const res = await apiGet('/student/dashboard')
+      const data = res?.data?.data
+      if (data) setApiDashboard(data)
+    } catch (e) {
+      console.error('[StudentDashboard] fetch error:', e)
+    } finally {
+      setApiLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!hasRealApi) return
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+    fetchDashboard()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId])
+
+  // Re-fetch when leave status is updated via socket
+  useEffect(() => {
+    if (!hasRealApi) return
+    const handler = () => fetchDashboard()
+    window.addEventListener('student:leave_updated', handler)
+    return () => window.removeEventListener('student:leave_updated', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId])
+
+  // --- Resolve which data source to use ---
+  const balance = hasRealApi && apiDashboard
+    ? apiDashboard.balances
+    : (studentId ? mockBalances[studentId] : null)
+
+  // Map API recent leaves to the shape the UI expects
+  const myRequests = useMemo(() => {
+    if (hasRealApi && apiDashboard?.recentLeaves) {
+      return apiDashboard.recentLeaves.slice(0, 8).map((r) => ({
+        id: String(r.id),
+        studentId: String(studentId),
+        type: r.type,
+        start: r.startDate ?? r.start_date ?? '',
+        end: r.endDate ?? r.end_date ?? '',
+        status: r.status,
+        submittedAt: r.submittedAt ?? r.submitted_at ?? '',
+      }))
+    }
+    return mockRequests.filter((r) => r.studentId === studentId).slice(0, 8)
+  }, [hasRealApi, apiDashboard, mockRequests, studentId])
+
+  const allMine = useMemo(() => {
+    if (hasRealApi && apiDashboard?.recentLeaves) {
+      return apiDashboard.recentLeaves.map((r) => ({
+        id: String(r.id),
+        studentId: String(studentId),
+        type: r.type,
+        start: r.startDate ?? r.start_date ?? '',
+        end: r.endDate ?? r.end_date ?? '',
+        status: r.status,
+        submittedAt: r.submittedAt ?? r.submitted_at ?? '',
+      }))
+    }
+    return mockRequests.filter((r) => r.studentId === studentId)
+  }, [hasRealApi, apiDashboard, mockRequests, studentId])
 
   const risk = balance ? computeLeaveRiskScore(allMine, balance) : 0
 
@@ -50,6 +114,8 @@ export function StudentDashboard() {
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
       .slice(0, 12)
   }, [allMine])
+
+  const isLoading = hasRealApi ? (apiLoading && !apiDashboard) : loading
 
   if (!user || user.role !== 'student') return null
 
@@ -86,7 +152,7 @@ export function StudentDashboard() {
           </Card>
         ) : null}
 
-        {!loading ? (
+        {!isLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryTile label="Pending requests" value={pendingCount} hint="Awaiting mentor" />
             <SummaryTile label="Risk score" value={`${risk}/100`} hint="Heuristic (demo)" />
@@ -107,7 +173,7 @@ export function StudentDashboard() {
           </div>
         ) : null}
 
-        {loading ? (
+        {isLoading ? (
           <BalanceCardsSkeleton />
         ) : (
           <div className="grid gap-4 sm:grid-cols-3">
@@ -129,7 +195,7 @@ export function StudentDashboard() {
           <div className="lg:col-span-2 space-y-6">
             <div className="space-y-3">
               <h2 className="text-sm font-semibold text-[var(--color-text)]">Recent leave history</h2>
-              {loading ? (
+              {isLoading ? (
                 <TableRowSkeleton count={4} />
               ) : myRequests.length === 0 ? (
                 <EmptyState
