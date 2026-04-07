@@ -193,9 +193,7 @@ export function LoginPage() {
           Sample student email is pre-filled.
         </p>
         <p className="text-center text-xs">
-          <Link to="/login" className="text-[var(--color-accent)] hover:underline font-medium">
-            Forgot password?
-          </Link>
+          
         </p>
       </div>
     </div>
