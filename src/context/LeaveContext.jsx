@@ -163,13 +163,15 @@ function reducer(state, action) {
       }
     }
     case 'MARK_NOTIFICATION_READ': {
-      const { id, recipientId, studentId } = action.payload
+      const { id, recipientId, studentId, read: readValue } = action.payload
       const rid = recipientId ?? studentId
+      // readValue defaults to true; passing false allows rollback
+      const nextRead = readValue !== false
       return {
         ...state,
         notifications: state.notifications.map((n) =>
           n.id === id && (n.recipientId === rid || (!n.recipientId && n.studentId === rid))
-            ? { ...n, read: true }
+            ? { ...n, read: nextRead }
             : n,
         ),
       }

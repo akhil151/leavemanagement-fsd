@@ -29,7 +29,10 @@ export default function StudentAnalyticsCharts({ requests }) {
 
   const byMonth = /** @type {Record<string, number>} */ ({})
   for (const r of requests) {
-    const m = r.submittedAt.slice(0, 7)
+    const ts = r.submittedAt ?? r.submitted_at ?? ''
+    if (!ts) continue
+    const m = ts.slice(0, 7)
+    if (m.length < 7) continue
     byMonth[m] = (byMonth[m] ?? 0) + 1
   }
   const trend = Object.entries(byMonth)

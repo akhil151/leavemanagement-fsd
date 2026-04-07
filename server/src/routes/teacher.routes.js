@@ -9,6 +9,7 @@ const r = Router()
 r.use(authenticate, requireRoles('teacher'))
 
 r.get('/leave-requests', validate(teacherFilterSchema, 'query'), teacherController.leaveRequests)
+r.get('/analytics', teacherController.analytics)
 r.post('/approve-leave', validate(leaveActionSchema), teacherController.approveLeave)
 r.post('/reject-leave', validate(leaveActionSchema), teacherController.rejectLeave)
 

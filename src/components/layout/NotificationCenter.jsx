@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
+import { useToast } from '../../context/ToastContext'
 import { Button } from '../ui/Button'
 import { cn } from '../../utils/cn'
 import { fetchNotifications, markNotificationsRead } from '../../services/notificationsApi'
@@ -8,6 +9,7 @@ import { fetchNotifications, markNotificationsRead } from '../../services/notifi
 export function NotificationCenter() {
   const { user } = useAuth()
   const { notifications, markNotificationRead, markAllNotificationsRead } = useLeave()
+  const { pushToast } = useToast()
   const [open, setOpen] = useState(false)
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [viewFilter, setViewFilter] = useState('all')
@@ -90,20 +92,33 @@ export function NotificationCenter() {
   }, [filtered, groupBy])
 
   const onMarkAll = async () => {
+    const prevRemote = remote
     markAllNotificationsRead({ recipientId: uid ?? '' })
+    if (remote) setRemote((prev) => prev?.map((n) => ({ ...n, read: true })) ?? prev)
     try {
       await markNotificationsRead({ markAll: true })
     } catch {
-      // Keep local UX responsive even when API is unavailable.
+      // Rollback remote list; context rollback not feasible for markAll without a full re-fetch
+      if (prevRemote) setRemote(prevRemote)
+      pushToast('Failed to mark all notifications as read. Please try again.')
     }
   }
 
   const onMarkOne = async (id) => {
+    // Capture previous read state for rollback
+    const sourceList = remote ?? mineLocal
+    const wasRead = sourceList.find((n) => n.id === id)?.read ?? true
+    if (wasRead) return // already read — nothing to do
+
     markNotificationRead({ id, recipientId: uid ?? '' })
+    if (remote) setRemote((prev) => prev?.map((n) => (n.id === id ? { ...n, read: true } : n)) ?? prev)
     try {
       await markNotificationsRead({ ids: [id] })
     } catch {
-      // Fallback already applied locally.
+      // Rollback both layers
+      markNotificationRead({ id, recipientId: uid ?? '', read: false })
+      if (remote) setRemote((prev) => prev?.map((n) => (n.id === id ? { ...n, read: false } : n)) ?? prev)
+      pushToast('Failed to mark notification as read. Please try again.')
     }
   }
 

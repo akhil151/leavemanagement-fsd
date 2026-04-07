@@ -137,6 +137,8 @@ export function TeacherDashboard() {
             : r,
         ),
       )
+      // Signal analytics pages to re-fetch
+      window.dispatchEvent(new CustomEvent('leave:updated', { detail: { requestId, status: actionDecision } }))
     },
     [],
   )

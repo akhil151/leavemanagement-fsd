@@ -116,20 +116,23 @@ export function SocketBridge() {
 
     const onUpdated = (payload, ack) => {
       try {
-        if (user.role !== 'student') return
-        if (payload.studentId && payload.studentId !== user.id) return
-        // Signal StudentDashboard to re-fetch from API
-        window.dispatchEvent(new CustomEvent('student:leave_updated', { detail: payload }))
-        ingestRealtimeNotification({
-          id: `rt_${Date.now()}_u`,
-          recipientId: user.id,
-          title: payload.status === 'approved' ? 'Leave approved' : 'Leave rejected',
-          body: 'Your leave request was updated.',
-          type: 'leave_updated',
-          priority: payload.status === 'approved' ? 'info' : 'warning',
-          read: false,
-          createdAt: new Date().toISOString(),
-        })
+        if (user.role === 'student') {
+          if (payload.studentId && payload.studentId !== user.id) return
+          // Signal StudentDashboard and StudentAnalyticsPage to re-fetch from API
+          window.dispatchEvent(new CustomEvent('student:leave_updated', { detail: payload }))
+          ingestRealtimeNotification({
+            id: `rt_${Date.now()}_u`,
+            recipientId: user.id,
+            title: payload.status === 'approved' ? 'Leave approved' : 'Leave rejected',
+            body: 'Your leave request was updated.',
+            type: 'leave_updated',
+            priority: payload.status === 'approved' ? 'info' : 'warning',
+            read: false,
+            createdAt: new Date().toISOString(),
+          })
+        }
+        // Signal analytics pages for teacher/admin too
+        window.dispatchEvent(new CustomEvent('leave:updated', { detail: payload }))
         if (ack) ack({ ok: true })
       } catch {
         if (ack) ack({ ok: false })

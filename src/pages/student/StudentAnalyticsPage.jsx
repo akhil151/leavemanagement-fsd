@@ -1,22 +1,69 @@
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useLeave } from '../../context/LeaveContext'
 import { AppShell } from '../../components/layout/AppShell'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card'
 import { analyzeLeavePatterns, computeLeaveRiskScore } from '../../services/leaveIntelligence'
+import { apiGet, hasRealApi } from '../../services/api'
 
 const StudentAnalyticsCharts = lazy(() => import('../../components/analytics/StudentAnalyticsCharts.jsx'))
 
 export function StudentAnalyticsPage() {
   const { user } = useAuth()
-  const { requests, balances } = useLeave()
+  const { requests: mockRequests, balances } = useLeave()
   const studentId = user?.id
 
-  const mine = useMemo(
-    () => requests.filter((r) => r.studentId === studentId),
-    [requests, studentId],
-  )
+  const [apiLeaves, setApiLeaves] = useState(/** @type {any[] | null} */ (null))
+  const [loading, setLoading] = useState(hasRealApi)
+
+  const fetchLeaves = () => {
+    if (!hasRealApi) return
+    setLoading(true)
+    apiGet('/student/my-leaves')
+      .then((res) => {
+        const rows = res?.data?.data
+        if (rows) {
+          setApiLeaves(rows.map((r) => ({
+            id: String(r.id),
+            studentId: String(studentId),
+            type: r.type,
+            start: r.startDate ?? r.start_date ?? '',
+            end: r.endDate ?? r.end_date ?? '',
+            status: r.status,
+            submittedAt: r.submittedAt ?? r.submitted_at ?? '',
+          })))
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchLeaves() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when leave status changes — debounced, single event source to avoid double-fetch.
+  // student:leave_updated (socket) and leave:updated (dashboard action) are both handled;
+  // the debounce ensures only one fetch fires even if both arrive together.
+  useEffect(() => {
+    if (!hasRealApi) return
+    let timer = null
+    const handler = () => {
+      clearTimeout(timer)
+      timer = setTimeout(fetchLeaves, 400)
+    }
+    window.addEventListener('student:leave_updated', handler)
+    window.addEventListener('leave:updated', handler)
+    return () => {
+      window.removeEventListener('student:leave_updated', handler)
+      window.removeEventListener('leave:updated', handler)
+      clearTimeout(timer)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mine = useMemo(() => {
+    if (hasRealApi && apiLeaves) return apiLeaves
+    return mockRequests.filter((r) => r.studentId === studentId)
+  }, [hasRealApi, apiLeaves, mockRequests, studentId])
 
   const bal = studentId ? balances[studentId] : null
   const risk = bal ? computeLeaveRiskScore(mine, bal) : 0
@@ -40,7 +87,7 @@ export function StudentAnalyticsPage() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-[var(--color-text-muted)]">
-                Heuristic based on volume vs remaining balance (demo).
+                Heuristic based on volume vs remaining balance.
               </p>
             </CardContent>
           </Card>
@@ -61,18 +108,24 @@ export function StudentAnalyticsPage() {
               <CardTitle className="text-2xl tabular-nums">{mine.length}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-xs text-[var(--color-text-muted)]">All time in demo dataset.</p>
+              <p className="text-xs text-[var(--color-text-muted)]">All time.</p>
             </CardContent>
           </Card>
         </div>
 
-        <Suspense
-          fallback={
-            <div className="h-48 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-elevated)] animate-pulse" />
-          }
-        >
-          <StudentAnalyticsCharts requests={mine} />
-        </Suspense>
+        {loading ? (
+          <div className="h-48 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-elevated)] animate-pulse" />
+        ) : mine.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-muted)]">No leave data yet.</p>
+        ) : (
+          <Suspense
+            fallback={
+              <div className="h-48 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-elevated)] animate-pulse" />
+            }
+          >
+            <StudentAnalyticsCharts requests={mine} />
+          </Suspense>
+        )}
       </div>
     </AppShell>
   )

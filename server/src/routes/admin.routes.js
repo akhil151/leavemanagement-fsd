@@ -15,6 +15,7 @@ const r = Router()
 
 r.use(authenticate, requireRoles('admin'))
 
+r.get('/analytics', adminController.analytics)
 r.get('/users', validate(adminUsersQuerySchema, 'query'), adminController.listUsers)
 r.post('/users', validate(createUserSchema), adminController.createUser)
 r.patch('/users/:id', validate(userIdParamSchema, 'params'), validate(updateUserSchema), adminController.updateUser)

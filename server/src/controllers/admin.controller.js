@@ -1,4 +1,32 @@
 import * as userService from '../services/user.service.js'
+import { getPool, query } from '../config/database.js'
+
+/**
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export async function analytics(req, res, next) {
+  try {
+    const pool = getPool()
+    const [statusRows, typeRows] = await Promise.all([
+      query(pool, `SELECT status, COUNT(*) AS count FROM leave_requests GROUP BY status`, {}),
+      query(pool, `SELECT type, COUNT(*) AS count FROM leave_requests GROUP BY type`, {}),
+    ])
+    const byStatus = { pending: 0, approved: 0, rejected: 0 }
+    for (const r of statusRows) {
+      const s = r.status
+      if (s && s in byStatus) byStatus[s] = Number(r.count) || 0
+    }
+    const byType = { sick: 0, casual: 0, on_duty: 0 }
+    for (const r of typeRows) {
+      if (r.type) byType[r.type] = Number(r.count) || 0
+    }
+    res.json({ success: true, data: { byStatus, byType } })
+  } catch (e) {
+    next(e)
+  }
+}
 
 /**
  * @param {import('express').Request} req
