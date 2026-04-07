@@ -59,6 +59,8 @@ function escapeDbIdentifier(dbName) {
  * @returns {Promise<import('mysql2/promise').Pool>}
  */
 export async function initializeDatabase() {
+  const sslOpts = env.db.ssl ? { rejectUnauthorized: false } : undefined
+
   const basePool = mysql.createPool({
     host: env.db.host,
     port: env.db.port,
@@ -66,6 +68,7 @@ export async function initializeDatabase() {
     password: env.db.password,
     waitForConnections: true,
     connectionLimit: Math.max(2, Math.min(env.db.connectionLimit, 5)),
+    ...(sslOpts && { ssl: sslOpts }),
   })
 
   await withRetry(async () => {
@@ -85,6 +88,7 @@ export async function initializeDatabase() {
     connectionLimit: env.db.connectionLimit,
     namedPlaceholders: true,
     dateStrings: true,
+    ...(sslOpts && { ssl: sslOpts }),
   })
 
   await withRetry(async () => {

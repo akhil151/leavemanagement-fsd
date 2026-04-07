@@ -21,6 +21,7 @@ export const env = {
     password: process.env.DB_PASSWORD ?? '',
     database: required('DB_NAME', 'leavemanage'),
     connectionLimit: Number(process.env.DB_POOL_SIZE ?? 10),
+    ssl: process.env.DB_SSL === 'true',
   },
   jwt: {
     secret: required('JWT_SECRET', 'dev-only-change-me-use-long-secret'),
